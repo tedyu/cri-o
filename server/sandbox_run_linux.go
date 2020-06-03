@@ -546,6 +546,7 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 	var ips []string
 	var result cnitypes.Result
 
+	networkStopDeferred := false
 	if s.config.ManageNSLifecycle {
 		ips, result, err = s.networkStart(ctx, sb)
 		if err != nil {
@@ -564,12 +565,13 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 		}
 		defer func() {
 			if err != nil {
-				log.Infof(ctx, "runSandbox: in manageNSLifecycle, stopping network for sandbox %s", sb.ID())
+				log.Infof(ctx, "runSandbox: stopping network for sandbox %s", sb.ID())
 				if err2 := s.networkStop(ctx, sb); err2 != nil {
 					log.Errorf(ctx, "error stopping network on cleanup: %v", err2)
 				}
 			}
 		}()
+		networkStopDeferred = true
 	}
 
 	for idx, ip := range ips {
@@ -650,14 +652,16 @@ func (s *Server) runPodSandbox(ctx context.Context, req *pb.RunPodSandboxRequest
 		if err != nil {
 			return nil, err
 		}
-		defer func() {
-			if err != nil {
-				log.Infof(ctx, "runSandbox: in not manageNSLifecycle, stopping network for sandbox %s", sb.ID())
-				if err2 := s.networkStop(ctx, sb); err2 != nil {
-					log.Errorf(ctx, "error stopping network on cleanup: %v", err2)
+		if !networkStopDeferred {
+			defer func() {
+				if err != nil {
+					log.Infof(ctx, "runSandbox: stopping network for sandbox %s", sb.ID())
+					if err2 := s.networkStop(ctx, sb); err2 != nil {
+						log.Errorf(ctx, "error stopping network on cleanup: %v", err2)
+					}
 				}
-			}
-		}()
+			}()
+		}
 	}
 	sb.AddIPs(ips)
 
